@@ -4,24 +4,22 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 )
 
 func main() {
-	groups := *flag.String("groups", "3312,3315,3330,3475,3362,3367,3403,3404,3405", "Goods groups")
+	groupsStr := *flag.String("groups", "3312,3315,3330,3475,3362,3367,3403,3404,3405", "Goods groups")
+	threadsCountStr := *flag.String("threads-count", "5", "Threads count for each group")
 	flag.Parse()
 
-	if groups == "" {
-		log("Need to provide groups")
+	logf("Groups: %v", groupsStr)
+	logf("Threads: %v", threadsCountStr)
 
-		fmt.Print("Press any key for exit...")
-		fmt.Scan()
+	groups := strings.Split(groupsStr, ",")
+	threadsCount, _ := strconv.Atoi(threadsCountStr)
 
-		os.Exit(0)
-	}
-
-	logf("Groups: %v", groups)
-
-	err := getGoods(groups)
+	err := parse(groups, threadsCount)
 	if err != nil {
 		log(err.Error())
 	}
