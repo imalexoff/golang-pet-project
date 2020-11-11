@@ -10,16 +10,16 @@ import (
 
 func main() {
 	groupsStr := *flag.String("groups", "3312,3315,3330,3475,3362,3367,3403,3404,3405", "Goods groups")
-	threadsCountStr := *flag.String("threads-count", "5", "Threads count for each group")
+	maxThreadsCountStr := *flag.String("max-threads-count", "5", "Max threads count per group")
 	flag.Parse()
 
 	logf("Groups: %v", groupsStr)
-	logf("Threads: %v", threadsCountStr)
+	logf("Max threads: %v", maxThreadsCountStr)
 
 	groups := strings.Split(groupsStr, ",")
-	threadsCount, _ := strconv.Atoi(threadsCountStr)
+	maxThreadsCount, _ := strconv.Atoi(maxThreadsCountStr)
 
-	err := parse(groups, threadsCount)
+	err := parse(groups, maxThreadsCount)
 	if err != nil {
 		log(err.Error())
 	}

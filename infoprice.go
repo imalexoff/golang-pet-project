@@ -18,7 +18,7 @@ func init() {
 	}
 }
 
-func parse(groups []string, threadsCount int) (err error) {
+func parse(groups []string, maxThreadsCount int) (err error) {
 	openFile()
 	defer closeFile()
 
@@ -30,20 +30,18 @@ func parse(groups []string, threadsCount int) (err error) {
 			defer wgGroups.Done()
 
 			var wgGoods sync.WaitGroup
-			wgGoods.Add(threadsCount)
 
-			packetsCount := calcPackets(group, threadsCount)
+			chunks := chunks(group, maxThreadsCount)
+			wgGoods.Add(len(chunks))
 
-			for i := 0; i < threadsCount; i++ {
-				go func(i int) {
+			for _, chunk := range chunks {
+				go func(chunk []int) {
 					defer wgGoods.Done()
 
-					startPage := (i * packetsCount) + 1
-					endPage := (i * packetsCount) + packetsCount
-					goods := getGoodsByPages(startPage, endPage, group)
+					goods := getGoodsByPages(chunk, group)
 
 					export(goods)
-				}(i)
+				}(chunk)
 			}
 
 			wgGoods.Wait()
@@ -77,17 +75,17 @@ func getGoods(req *Request) (goods []GoodsOffer, amountPages int) {
 	return goods, amountPages
 }
 
-func getGoodsByPages(startPage, endPage int, group string) (goods []GoodsOffer) {
+func getGoodsByPages(chunk []int, group string) (goods []GoodsOffer) {
 	req := newRequest()
 	req.Packet.Data.GoodsGroupID = group
 
-	for i := startPage; i <= endPage; i++ {
-		req.Packet.Data.Page = i
+	for i := 0; i < len(chunk); i++ {
+		req.Packet.Data.Page = chunk[i]
 
 		data, _ := getGoods(req)
 		goods = append(goods, data...)
 
-		logf("Page %v is done", i)
+		logf("Group %v, Page %v is done", group, chunk[i])
 	}
 
 	return goods
@@ -101,17 +99,41 @@ func export(pageGoods []GoodsOffer) {
 	}
 }
 
-func calcPackets(group string, threadsCount int) (packetsCount int) {
+func chunks(group string, maxThreadsCount int) (chunks [][]int) {
 	req := newRequest()
 	req.Packet.Data.GoodsGroupID = group
 
 	_, amountPages := getGoods(req)
 
-	if amountPages%threadsCount == 0 {
-		packetsCount = amountPages / threadsCount
+	chankCapacity := amountPages / maxThreadsCount
+	var threadsCount int
+	if chankCapacity > 0 {
+		threadsCount = maxThreadsCount
 	} else {
-		packetsCount = (amountPages / threadsCount) + 1
+		threadsCount = amountPages
+		chankCapacity = 1
 	}
 
-	return packetsCount
+	pages := make([]int, amountPages)
+	for i := range pages {
+		pages[i] = i + 1
+	}
+
+	remainsPages := pages[amountPages-(amountPages%threadsCount):]
+
+	chunks = make([][]int, threadsCount)
+	for i := 0; i < threadsCount; i++ {
+		skip := i * chankCapacity
+		take := skip + chankCapacity
+
+		chunks[i] = make([]int, chankCapacity, chankCapacity+1)
+		copy(chunks[i], pages[skip:take])
+
+		if i < len(remainsPages) {
+			chunks[i] = append(chunks[i], remainsPages[i:i+1]...)
+			//chunks[i][len(chunks[i])-1] = remainsPages[i : i+1][i]
+		}
+	}
+
+	return chunks
 }
