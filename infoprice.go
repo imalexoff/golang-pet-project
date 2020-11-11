@@ -1,133 +1,139 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"net/http"
+	"sync"
 
 	"github.com/tidwall/gjson"
 )
 
-type request struct {
-	CRC    string `json:"CRC"`
-	Packet packet `json:"Packet"`
+var contractorsMap map[int]string
+
+func init() {
+	contractors := getContractors()
+	contractorsMap = make(map[int]string)
+	for _, value := range contractors {
+		contractorsMap[value.ContractorID] = value.ContractorName
+	}
 }
 
-type packet struct {
-	FromID    string `json:"FromId"`
-	ServerKey string `json:"ServerKey"`
-	Data      data   `json:"Data"`
-}
-
-type data struct {
-	ContractorID       string `json:"ContractorId"`
-	GoodsGroupID       string `json:"GoodsGroupId"`
-	Page               int    `json:"Page"`
-	Search             string `json:"Search"`
-	OrderBy            int    `json:"OrderBy"`
-	OrderByContractor  int    `json:"OrderByContractor"`
-	CompareOntractorID int    `json:"CompareСontractorId"`
-	CatalogType        int    `json:"CatalogType"`
-}
-
-type goodsOffer struct {
-	GoodsID   int     `json:"GoodsId"`
-	GoodsName string  `json:"GoodsName"`
-	Offers    []offer `json:"Offers"`
-}
-
-type offer struct {
-	ContractorID   int    `json:"ContractorId"`
-	AddressShop    string `json:"AddressShop"`
-	MonitoringDate string `json:"MonitoringDate"`
-}
-
-type contractor struct {
-	ContractorID   int    `json:"ContractorId"`
-	ContractorName string `json:"ContractorName"`
-}
-
-var contractors map[int]string
-
-func getGoods(groups string) error {
+func parse(groups []string, maxThreadsCount int) (err error) {
 	openFile()
 	defer closeFile()
 
-	request := initRequest(groups)
-	initContractors(*request)
+	var wgGroups sync.WaitGroup
+	wgGroups.Add(len(groups))
 
-	var currPage int = 1
+	for _, group := range groups {
+		go func(group string) {
+			defer wgGroups.Done()
 
-	for {
-		request.Packet.Data.Page = currPage
-		reqBody, _ := json.Marshal(request)
+			var wgGoods sync.WaitGroup
 
-		resp, err := http.Post("https://api.infoprice.by/InfoPrice.Goods?v=2", "application/json", bytes.NewBuffer(reqBody))
-		if err != nil {
-			log(err.Error())
-			return err
-		}
-		respData, _ := ioutil.ReadAll(resp.Body)
-		resp.Body.Close()
+			chunks := chunks(group, maxThreadsCount)
+			wgGoods.Add(len(chunks))
 
-		amountPages := gjson.GetBytes(respData, "Table.0.GeneralData.0.AmountPages").Num
-		goodsJSON := gjson.GetBytes(respData, "Table.0.GoodsOffer").Raw
+			for _, chunk := range chunks {
+				go func(chunk []int) {
+					defer wgGoods.Done()
 
-		log(fmt.Sprintf("page %v from %v", currPage, amountPages))
+					goods := getGoodsByPages(chunk, group)
 
-		var pageGoods []goodsOffer
-		json.Unmarshal([]byte(goodsJSON), &pageGoods)
+					export(goods)
+				}(chunk)
+			}
 
-		export(pageGoods)
-
-		if currPage == int(amountPages) {
-			break
-		}
-
-		currPage++
+			wgGoods.Wait()
+		}(group)
 	}
+
+	wgGroups.Wait()
 
 	return nil
 }
 
-func initRequest(groups string) *request {
-	return &request{
-		Packet: packet{
-			FromID:    "10003001",
-			ServerKey: "omt5W465fjwlrtxcEco97kew2dkdrorqqq",
-			Data: data{
-				GoodsGroupID: groups,
-			},
-		},
-	}
+func getContractors() (contractors []Contractor) {
+	req := newRequest()
+	data := executeRequest("https://api.infoprice.by/InfoPrice.Contractors?v=3", req)
+
+	contractorsJSON := gjson.GetBytes(data, "Table").Raw
+
+	json.Unmarshal([]byte(contractorsJSON), &contractors)
+
+	return contractors
 }
 
-func initContractors(request request) {
-	reqBody, _ := json.Marshal(request)
-	resp, err := http.Post("https://api.infoprice.by/InfoPrice.Contractors?v=3", "application/json", bytes.NewBuffer(reqBody))
-	if err != nil {
-		log(err.Error())
-		panic(err)
-	}
-	defer resp.Body.Close()
+func getGoods(req *Request) (goods []GoodsOffer, amountPages int) {
+	data := executeRequest("https://api.infoprice.by/InfoPrice.Goods?v=2", req)
 
-	respData, _ := ioutil.ReadAll(resp.Body)
-	contractorsJSON := gjson.GetBytes(respData, "Table").Raw
-	var _contractors []contractor
-	json.Unmarshal([]byte(contractorsJSON), &_contractors)
+	amountPages = int(gjson.GetBytes(data, "Table.0.GeneralData.0.AmountPages").Num)
+	goodsJSON := gjson.GetBytes(data, "Table.0.GoodsOffer").Raw
 
-	contractors = make(map[int]string)
-	for _, v := range _contractors {
-		contractors[v.ContractorID] = v.ContractorName
-	}
+	json.Unmarshal([]byte(goodsJSON), &goods)
+
+	return goods, amountPages
 }
 
-func export(pageGoods []goodsOffer) {
+func getGoodsByPages(chunk []int, group string) (goods []GoodsOffer) {
+	req := newRequest()
+	req.Packet.Data.GoodsGroupID = group
+
+	for i := 0; i < len(chunk); i++ {
+		req.Packet.Data.Page = chunk[i]
+
+		data, _ := getGoods(req)
+		goods = append(goods, data...)
+
+		logf("Group %v, Page %v is done", group, chunk[i])
+	}
+
+	return goods
+}
+
+func export(pageGoods []GoodsOffer) {
 	for _, goods := range pageGoods {
 		for _, offer := range goods.Offers {
-			writeToFile(fmt.Sprintf("[%v][%v][%v][%v][%v]\n", contractors[offer.ContractorID], offer.AddressShop, offer.MonitoringDate, goods.GoodsID, goods.GoodsName))
+			writeToFile(fmt.Sprintf("[%v][%v][%v][%v][%v]\n", contractorsMap[offer.ContractorID], offer.AddressShop, offer.MonitoringDate, goods.GoodsID, goods.GoodsName))
 		}
 	}
+}
+
+func chunks(group string, maxThreadsCount int) (chunks [][]int) {
+	req := newRequest()
+	req.Packet.Data.GoodsGroupID = group
+
+	_, amountPages := getGoods(req)
+
+	chankCapacity := amountPages / maxThreadsCount
+	var threadsCount int
+	if chankCapacity > 0 {
+		threadsCount = maxThreadsCount
+	} else {
+		threadsCount = amountPages
+		chankCapacity = 1
+	}
+
+	pages := make([]int, amountPages)
+	for i := range pages {
+		pages[i] = i + 1
+	}
+
+	remainsPages := pages[amountPages-(amountPages%threadsCount):]
+
+	chunks = make([][]int, threadsCount)
+	for i := 0; i < threadsCount; i++ {
+		skip := i * chankCapacity
+		take := skip + chankCapacity
+
+		chunks[i] = make([]int, chankCapacity, chankCapacity+1)
+		copy(chunks[i], pages[skip:take])
+
+		if i < len(remainsPages) {
+			chunks[i] = append(chunks[i], remainsPages[i:i+1]...)
+			//chunks[i][len(chunks[i])-1] = remainsPages[i : i+1][i]
+		}
+	}
+
+	return chunks
 }
