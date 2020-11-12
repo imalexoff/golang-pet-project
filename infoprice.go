@@ -94,7 +94,7 @@ func getGoodsByPages(chunk []int, group string) (goods []GoodsOffer) {
 func export(pageGoods []GoodsOffer) {
 	for _, goods := range pageGoods {
 		for _, offer := range goods.Offers {
-			writeToFile(fmt.Sprintf("[%v][%v][%v][%v][%v]\n", contractorsMap[offer.ContractorID], offer.AddressShop, offer.MonitoringDate, goods.GoodsID, goods.GoodsName))
+			writeToFile(fmt.Sprintf("%v|%v|%v|%v|%v|%v|%v\n", contractorsMap[offer.ContractorID], offer.AddressShop, offer.MonitoringDate, goods.GoodsGroupName, goods.GoodsID, goods.GoodsName, offer.Price))
 		}
 	}
 }

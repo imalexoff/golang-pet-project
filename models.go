@@ -27,9 +27,10 @@ type Data struct {
 
 // GoodsOffer ...
 type GoodsOffer struct {
-	GoodsID   int     `json:"GoodsId"`
-	GoodsName string  `json:"GoodsName"`
-	Offers    []Offer `json:"Offers"`
+	GoodsGroupName string  `json:"GoodsGroupName"`
+	GoodsID        int     `json:"GoodsId"`
+	GoodsName      string  `json:"GoodsName"`
+	Offers         []Offer `json:"Offers"`
 }
 
 // Offer ...
@@ -37,6 +38,7 @@ type Offer struct {
 	ContractorID   int    `json:"ContractorId"`
 	AddressShop    string `json:"AddressShop"`
 	MonitoringDate string `json:"MonitoringDate"`
+	Price          string `json:"Price"`
 }
 
 // Contractor ...
